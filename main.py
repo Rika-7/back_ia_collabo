@@ -4,10 +4,15 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import os
 from dotenv import load_dotenv
+from pydantic import BaseModel
+from typing import List
 
 # Import database components
 from database import get_db, engine, Base
 import models
+
+# Import ベクトルサーチ
+from components.search_researchers import search_researchers
 
 # Load environment variables
 load_dotenv()
@@ -90,3 +95,40 @@ def get_researcher_by_id(researcher_id: str, db: Session = Depends(get_db)):
         return {"status": "success", "researcher": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+
+# リクエストモデル
+class SearchRequest(BaseModel):
+    category: str
+    title: str
+    description: str
+    university:str = "東京科学大学"
+    top_k: int = 10  # 10件取得
+
+# レスポンスモデル
+class ResearcherResponse(BaseModel):
+    researcher_id: str
+    name: str
+    university: str
+    affiliation: str
+    position: str
+    research_field: str
+    keywords: str
+    explanation: str
+    score: float
+
+@app.post("/search-researchers",response_model=List[ResearcherResponse])
+def search_researchers_api(request: SearchRequest):
+    try:
+        search_results = search_researchers(
+            category=request.category,
+            title=request.title,
+            description=request.description,
+            university=request.university,
+            top_k=request.top_k
+            )
+        
+        return search_results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
