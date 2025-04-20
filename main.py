@@ -1,11 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, or_
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 # Import database components
 from database import get_db, engine, Base
@@ -28,21 +28,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Create database tables (uncomment when you have models defined)
-# Base.metadata.create_all(bind=engine)
+# Project response model
+class ProjectResponse(BaseModel):
+    project_id: int
+    types_to_register: str
+    company_user_id: int
+    project_title: str
+    consultation_category: int
+    project_content: str
+    research_field: str
+    preferred_researcher_level: str
+    budget: str
+    application_deadline: str
+    project_status: int
+    closed_date: Optional[str] = None
+
+# Project search request model
+class ProjectSearchRequest(BaseModel):
+    keyword: Optional[str] = None
+    category: Optional[int] = None
+    status: Optional[int] = None
+
 
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
-
-@app.get("/test-db")
-def test_database(db: Session = Depends(get_db)):
-    try:
-        # Execute a simple query with proper text() wrapper
-        result = db.execute(text("SELECT 1")).fetchone()
-        return {"status": "success", "result": str(result[0])}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
 
 @app.get("/researchers")
 def get_researchers(db: Session = Depends(get_db)):
@@ -96,8 +106,6 @@ def get_researcher_by_id(researcher_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
-
 # リクエストモデル
 class SearchRequest(BaseModel):
     category: str
@@ -118,7 +126,7 @@ class ResearcherResponse(BaseModel):
     explanation: str
     score: float
 
-@app.post("/search-researchers",response_model=List[ResearcherResponse])
+@app.post("/search-researchers", response_model=List[ResearcherResponse])
 def search_researchers_api(request: SearchRequest):
     try:
         search_results = search_researchers(
@@ -132,3 +140,94 @@ def search_researchers_api(request: SearchRequest):
         return search_results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/projects")
+def get_projects(page: int = 1, per_page: int = 10, db: Session = Depends(get_db)):
+    try:
+        # Calculate offset for pagination
+        offset = (page - 1) * per_page
+        
+        # Get projects
+        projects = db.query(models.Project).offset(offset).limit(per_page).all()
+        
+        # Get total count
+        total = db.query(models.Project).count()
+        
+        # Convert to list of dictionaries
+        result = []
+        for p in projects:
+            result.append({
+                "project_id": p.project_id,
+                "project_title": p.project_title,
+                "research_field": p.research_field,
+                "project_status": p.project_status
+            })
+        
+        return {
+            "status": "success",
+            "projects": result,
+            "total": total,
+            "page": page,
+            "per_page": per_page
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/projects/{project_id}")
+def get_project_by_id(project_id: int, db: Session = Depends(get_db)):
+    try:
+        # Find project by ID
+        project = db.query(models.Project).filter(models.Project.project_id == project_id).first()
+        
+        if not project:
+            return {"status": "error", "message": "Project not found"}
+        
+        # Convert to dictionary
+        result = {
+            "project_id": project.project_id,
+            "types_to_register": project.types_to_register,
+            "company_user_id": project.company_user_id,
+            "project_title": project.project_title,
+            "consultation_category": project.consultation_category,
+            "project_content": project.project_content,
+            "research_field": project.research_field,
+            "preferred_researcher_level": project.preferred_researcher_level,
+            "budget": project.budget,
+            "application_deadline": project.application_deadline,
+            "project_status": project.project_status,
+            "closed_date": project.closed_date
+        }
+        
+        return {"status": "success", "project": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/search-projects")
+def search_projects(keyword: str = "", db: Session = Depends(get_db)):
+    try:
+        # Search in title, content, and research field
+        projects = db.query(models.Project).filter(
+            or_(
+                models.Project.project_title.contains(keyword),
+                models.Project.project_content.contains(keyword),
+                models.Project.research_field.contains(keyword)
+            )
+        ).limit(10).all()
+        
+        # Convert to list of dictionaries
+        result = []
+        for p in projects:
+            result.append({
+                "project_id": p.project_id,
+                "project_title": p.project_title,
+                "research_field": p.research_field,
+                "project_status": p.project_status
+            })
+        
+        return {
+            "status": "success",
+            "projects": result,
+            "total": len(result)
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
