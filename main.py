@@ -17,7 +17,12 @@ from components.search_researchers import search_researchers
 # Load environment variables
 load_dotenv()
 
-app = FastAPI()
+# Create the FastAPI app with a title
+app = FastAPI(
+    title="Research API",
+    description="API for managing researchers and projects",
+    version="0.1.0"
+)
 
 # ミドルウェアの設定
 app.add_middleware(
@@ -50,11 +55,12 @@ class ProjectSearchRequest(BaseModel):
     status: Optional[int] = None
 
 
-@app.get("/")
+@app.get("/", tags=["General"])
 def read_root():
     return {"Hello": "World"}
 
-@app.get("/researchers")
+# --- Researcher endpoints ---
+@app.get("/researchers", tags=["Researchers"])
 def get_researchers(db: Session = Depends(get_db)):
     try:
         # Get the first 10 researchers
@@ -76,7 +82,7 @@ def get_researchers(db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.get("/researchers/{researcher_id}")
+@app.get("/researchers/{researcher_id}", tags=["Researchers"])
 def get_researcher_by_id(researcher_id: str, db: Session = Depends(get_db)):
     try:
         # Find researcher by ID
@@ -126,7 +132,7 @@ class ResearcherResponse(BaseModel):
     explanation: str
     score: float
 
-@app.post("/search-researchers", response_model=List[ResearcherResponse])
+@app.post("/search-researchers", response_model=List[ResearcherResponse], tags=["Researchers"])
 def search_researchers_api(request: SearchRequest):
     try:
         search_results = search_researchers(
@@ -141,7 +147,8 @@ def search_researchers_api(request: SearchRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/projects")
+# --- Project endpoints ---
+@app.get("/projects", tags=["Projects"])
 def get_projects(page: int = 1, per_page: int = 10, db: Session = Depends(get_db)):
     try:
         # Calculate offset for pagination
@@ -173,7 +180,7 @@ def get_projects(page: int = 1, per_page: int = 10, db: Session = Depends(get_db
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.get("/projects/{project_id}")
+@app.get("/projects/{project_id}", tags=["Projects"])
 def get_project_by_id(project_id: int, db: Session = Depends(get_db)):
     try:
         # Find project by ID
@@ -202,7 +209,7 @@ def get_project_by_id(project_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@app.get("/search-projects")
+@app.get("/search-projects", tags=["Projects"])
 def search_projects(keyword: str = "", db: Session = Depends(get_db)):
     try:
         # Search in title, content, and research field
