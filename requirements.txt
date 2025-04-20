@@ -1,12 +1,23 @@
+# Web framework
 fastapi==0.112.2
 uvicorn==0.32.1
+gunicorn==21.2.0
+
+# Database
 sqlalchemy==2.0.37
 mysql-connector-python==9.0.0
+pymysql>=1.0.0
+cryptography>=40.0.0  # Often needed for MySQL SSL connections
+
+# Environment variables
 python-dotenv==1.0.1
-numpy==1.26.4
-pandas==2.1.4
-openai==1.12.0
+
+# Data processing - using wheel installation to avoid compilation issues
+numpy>=1.26.4
+pandas>=2.2.0  # Using a more recent version compatible with Python 3.13
+
+# AI and API
+openai>=1.12.0  # Using >= to allow for newer compatible versions
 azure-search-documents==11.4.0
 azure-core==1.29.5
 requests==2.32.3
-gunicorn==21.2.0
