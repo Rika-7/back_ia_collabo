@@ -1,7 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text
 from database import Base
 
-# Simple model for the researcher_information table
 class Researcher(Base):
     __tablename__ = "researcher_information"
 
@@ -19,3 +18,20 @@ class Researcher(Base):
     keywords = Column(Text)
     research_project_counts = Column(Integer)
     output_counts = Column(Integer)
+
+# New Project model - add this to your existing models.py
+class Project(Base):
+    __tablename__ = "project_information"
+
+    project_id = Column(Integer, primary_key=True)
+    types_to_register = Column(String(255))
+    company_user_id = Column(Integer)
+    project_title = Column(String(255))
+    consultation_category = Column(Integer)
+    project_content = Column(Text)
+    research_field = Column(String(255))
+    preferred_researcher_level = Column(String(255))
+    budget = Column(String(255))
+    application_deadline = Column(String(255))
+    project_status = Column(Integer)
+    closed_date = Column(String(255))
