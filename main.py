@@ -238,3 +238,48 @@ def search_projects(keyword: str = "", db: Session = Depends(get_db)):
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+    
+    # Add this endpoint to your main.py file
+
+@app.get("/filtered-projects", tags=["Projects"])
+def get_filtered_projects(
+    types_to_register: str = Query(None), 
+    preferred_researcher_level: str = Query(None),
+    limit: int = 6,
+    db: Session = Depends(get_db)
+):
+    try:
+        # Build the query with filters
+        query = db.query(models.Project)
+        
+        # Add filter conditions if provided
+        if types_to_register:
+            query = query.filter(models.Project.types_to_register == types_to_register)
+        
+        if preferred_researcher_level:
+            query = query.filter(models.Project.preferred_researcher_level == preferred_researcher_level)
+        
+        # Get projects with limit
+        projects = query.limit(limit).all()
+        
+        # Convert to list of dictionaries
+        result = []
+        for p in projects:
+            result.append({
+                "project_id": p.project_id,
+                "project_title": p.project_title,
+                "research_field": p.research_field,
+                "budget": p.budget,
+                "application_deadline": p.application_deadline,
+                "preferred_researcher_level": p.preferred_researcher_level,
+                "types_to_register": p.types_to_register,
+                "project_status": p.project_status
+            })
+        
+        return {
+            "status": "success",
+            "projects": result,
+            "total": len(result)
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
