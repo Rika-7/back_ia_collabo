@@ -239,8 +239,6 @@ def search_projects(keyword: str = "", db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
     
-    # Add this endpoint to your main.py file
-
 @app.get("/filtered-projects", tags=["Projects"])
 def get_filtered_projects(
     types_to_register: str = Query(None), 
@@ -273,7 +271,8 @@ def get_filtered_projects(
                 "application_deadline": p.application_deadline,
                 "preferred_researcher_level": p.preferred_researcher_level,
                 "types_to_register": p.types_to_register,
-                "project_status": p.project_status
+                "project_status": p.project_status,
+                "company_user_id": p.company_user_id  
             })
         
         return {
