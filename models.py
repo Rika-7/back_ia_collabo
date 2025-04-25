@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from database import Base
 
 class Researcher(Base):
@@ -25,7 +26,7 @@ class Project(Base):
 
     project_id = Column(Integer, primary_key=True)
     types_to_register = Column(String(255))
-    company_user_id = Column(Integer)
+    company_user_id = Column(Integer, ForeignKey('company_user.company_user_id'))
     project_title = Column(String(255))
     consultation_category = Column(Integer)
     project_content = Column(Text)
@@ -35,3 +36,29 @@ class Project(Base):
     application_deadline = Column(String(255))
     project_status = Column(Integer)
     closed_date = Column(String(255))
+
+    user = relationship("CompanyUser", back_populates="projects")
+
+
+class Company(Base):
+    __tablename__="company"
+
+    company_id = Column(Integer,primary_key=True)
+    company_name = Column(String(255))
+    company_plan = Column(String(255))
+
+    users = relationship("CompanyUser", back_populates="company")
+
+
+class CompanyUser(Base):
+    __tablename__="company_user"
+
+    company_user_id = Column(Integer,primary_key=True)
+    company_id = Column(Integer, ForeignKey('company.company_id'))
+    company_user_name = Column(String(255))
+    department = Column(String(255))
+    company_user_email = Column(String(255))
+    password = Column(String(255))
+
+    company = relationship("Company", back_populates="users")
+    projects = relationship("Project", back_populates="user")
