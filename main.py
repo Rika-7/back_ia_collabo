@@ -362,6 +362,7 @@ def search_projects(
             project_list.append({
                 "project_id": project.project_id,
                 "project_title": project.project_title,
+                "project_content":project.project_content,
                 "research_field": project.research_field,
                 "project_status": project.project_status,
                 "budget": project.budget,
