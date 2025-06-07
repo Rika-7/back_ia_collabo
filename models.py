@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text, ForeignKey
+from sqlalchemy.orm import relationship
 from database import Base
 
 class Researcher(Base):
@@ -24,7 +25,6 @@ class Researcher(Base):
 
 class ResearchProject(Base):
     __tablename__ = "research_project"
-
     id = Column(Integer, primary_key=True, autoincrement=True)
     research_project_id = Column(String(255))
     researcher_id = Column(Integer)
