@@ -12,12 +12,13 @@ from azure.search.documents.indexes.models import (
 )
 import requests
 import json
+import time
+from typing import List, Dict, Any
 
 # ローカルで動かす時用
 from dotenv import load_dotenv
 
 load_dotenv()
-
 
 # 環境変数からAzureのAPIキーを取得
 AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
@@ -26,7 +27,6 @@ AZURE_OPENAI_GPT_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_GPT_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT")
 AZURE_SEARCH_API_KEY = os.getenv("AZURE_SEARCH_API_KEY")
 AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
-AZURE_SEARCH_INDEX_NAME = os.getenv("AZURE_SEARCH_INDEX_NAME")
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME = os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME")
 
 # OpenAI API クライアント設定
@@ -34,12 +34,25 @@ openai.api_key = AZURE_OPENAI_API_KEY
 openai.api_base = AZURE_OPENAI_ENDPOINT
 openai.api_version = "2023-07-01-preview"
 
-# Azure AI Search クライアント設定
-search_client = SearchClient(
-    endpoint=AZURE_SEARCH_ENDPOINT,
-    index_name=AZURE_SEARCH_INDEX_NAME,
-    credential=AzureKeyCredential(AZURE_SEARCH_API_KEY)
-)
+# パターン別のSearchClientを取得する関数
+def get_search_client_for_pattern(pattern):
+    """パターンに応じたSearchClientを返す"""
+    # 確認済みの実際のインデックス名を使用
+    index_names = {
+        "A": "science_tokyo_pattern_a",
+        "B": "science_tokyo_pattern_b", 
+        "C": "science_tokyo_pattern_c"
+    }
+    
+    index_name = index_names.get(pattern.upper())
+    if not index_name:
+        raise ValueError(f"Invalid pattern: {pattern}")
+    
+    return SearchClient(
+        endpoint=AZURE_SEARCH_ENDPOINT,
+        index_name=index_name,
+        credential=AzureKeyCredential(AZURE_SEARCH_API_KEY)
+    )
 
 # 埋め込みを取得する関数
 def get_embedding(text):
@@ -48,46 +61,6 @@ def get_embedding(text):
         model=os.getenv("AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME")
     )
     return response.data[0].embedding
-
-# 依頼に基づく研究者検索
-def search_researchers(category, title, description, university="東京科学大学", top_k=10):
-    try:
-        query_text = f"{category} {title} {description}"
-        embedding = get_embedding(query_text)
-        
-        results = search_client.search(
-            search_text=None,
-            vector_queries=[
-                VectorizedQuery(
-                    vector=embedding,
-                    k_nearest_neighbors=top_k,
-                    fields="vector"
-                )
-            ],
-            select=["id", "name", "university", "affiliation", "position","research_field", "keywords"],
-            filter=f"university eq '{university}'"
-        )
-
-        search_results = []
-        for result in results:
-            explanation = generate_explanation(query_text, result)
-            search_results.append({
-                "researcher_id": result["id"],
-                "name": result["name"],
-                "university": result["university"],
-                "affiliation": result["affiliation"],
-                "position": result["position"],
-                "research_field": result["research_field"],
-                "keywords": result["keywords"],
-                "explanation": explanation,
-                "score": result.get('@search.score', 0)
-            })
-        
-        return search_results
-    
-    except Exception as e:
-        print("search_researchers内で例外発生:", e)
-        raise
 
 def get_openai_response(messages):
     """
@@ -131,40 +104,273 @@ def get_openai_response(messages):
     else:
         raise Exception(f"Request failed with status code {response.status_code}: {response.text}")
 
+# パターンA: 研究者キーワードのみ検索
+def search_researchers_pattern_a(category, title, description, university="東京科学大学", top_k=10):
+    """
+    Pattern A: 研究者キーワードのみを使用した検索（KAKENデータのみ）
+    """
+    try:
+        start_time = time.time()
+        query_text = f"{category} {title} {description}"
+        embedding = get_embedding(query_text)
+        
+        # Pattern A専用のSearchClientを取得
+        search_client = get_search_client_for_pattern("A")
+        
+        # パターンA用のフィールド選択（基本情報のみ）
+        results = search_client.search(
+            search_text=None,
+            vector_queries=[
+                VectorizedQuery(
+                    vector=embedding,
+                    k_nearest_neighbors=top_k,
+                    fields="science_tokyo_pattern_a"  # Pattern A vector field
+                )
+            ],
+            select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi"],
+            filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
+        )
 
-# 研究者のマッチ理由を生成
-def generate_explanation(query_text, researcher):
+        search_results = []
+        for result in results:
+            explanation = generate_explanation_pattern_a(query_text, result)
+            search_results.append({
+                "researcher_id": result["researcher_id"],
+                "name": "",  # Not available in Pattern A
+                "university": university,  # Use the filtered university
+                "affiliation": result["researcher_affiliation_current"],
+                "position": result["researcher_position_current"],
+                "research_field": "",  # Not available in Pattern A
+                "keywords": result["keywords_pi"],
+                "explanation": explanation,
+                "score": result.get('@search.score', 0),
+                "pattern": "A"
+            })
+        
+        search_time = time.time() - start_time
+        return {
+            "results": search_results,
+            "search_time": search_time,
+            "pattern": "A",
+            "pattern_description": "研究者キーワードのみ（KAKEN）"
+        }
+    
+    except Exception as e:
+        print("search_researchers_pattern_a内で例外発生:", e)
+        raise
+
+# パターンB: 研究者キーワード + 研究課題
+def search_researchers_pattern_b(category, title, description, university="東京科学大学", top_k=10):
+    """
+    Pattern B: 研究者キーワード + 研究課題を使用した検索（KAKENデータ拡張）
+    """
+    try:
+        start_time = time.time()
+        query_text = f"{category} {title} {description}"
+        embedding = get_embedding(query_text)
+        
+        # Pattern B専用のSearchClientを取得
+        search_client = get_search_client_for_pattern("B")
+        
+        # パターンB用のフィールド選択（研究課題情報を含む）
+        results = search_client.search(
+            search_text=None,
+            vector_queries=[
+                VectorizedQuery(
+                    vector=embedding,
+                    k_nearest_neighbors=top_k,
+                    fields="science_tokyo_pattern_b"  # Pattern B vector field
+                )
+            ],
+            select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi", "research_project_title", "research_project_details", "research_achievement"],
+            filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
+        )
+
+        search_results = []
+        for result in results:
+            explanation = generate_explanation_pattern_b(query_text, result)
+            search_results.append({
+                "researcher_id": result["researcher_id"],
+                "name": "",  # Not available in Pattern B
+                "university": university,  # Use the filtered university
+                "affiliation": result["researcher_affiliation_current"],
+                "position": result["researcher_position_current"],
+                "research_field": "",  # Not available in Pattern B
+                "keywords": result["keywords_pi"],
+                "research_projects": f"{result.get('research_project_title', '')} | {result.get('research_project_details', '')} | {result.get('research_achievement', '')}",
+                "explanation": explanation,
+                "score": result.get('@search.score', 0),
+                "pattern": "B"
+            })
+        
+        search_time = time.time() - start_time
+        return {
+            "results": search_results,
+            "search_time": search_time,
+            "pattern": "B", 
+            "pattern_description": "研究者キーワード + 研究課題（KAKEN拡張）"
+        }
+    
+    except Exception as e:
+        print("search_researchers_pattern_b内で例外発生:", e)
+        raise
+
+# パターンC: 研究者キーワード + 論文（タイトル・概要）
+def search_researchers_pattern_c(category, title, description, university="東京科学大学", top_k=10):
+    """
+    Pattern C: 研究者キーワード + 論文（タイトル・概要）を使用した検索（KAKEN + researchmap）
+    """
+    try:
+        start_time = time.time()
+        query_text = f"{category} {title} {description}"
+        embedding = get_embedding(query_text)
+        
+        # Pattern C専用のSearchClientを取得
+        search_client = get_search_client_for_pattern("C")
+        
+        # パターンC用のフィールド選択（論文情報を含む）
+        results = search_client.search(
+            search_text=None,
+            vector_queries=[
+                VectorizedQuery(
+                    vector=embedding,
+                    k_nearest_neighbors=top_k,
+                    fields="science_tokyo_pattern_c"  # Pattern C vector field
+                )
+            ],
+            select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi", "publication_title", "description_publication"],
+            filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
+        )
+
+        search_results = []
+        for result in results:
+            explanation = generate_explanation_pattern_c(query_text, result)
+            search_results.append({
+                "researcher_id": result["researcher_id"],
+                "name": "",  # Not available in Pattern C
+                "university": university,  # Use the filtered university
+                "affiliation": result["researcher_affiliation_current"],
+                "position": result["researcher_position_current"],
+                "research_field": "",  # Not available in Pattern C
+                "keywords": result["keywords_pi"],
+                "publications": f"{result.get('publication_title', '')} | {result.get('description_publication', '')}",
+                "explanation": explanation,
+                "score": result.get('@search.score', 0),
+                "pattern": "C"
+            })
+        
+        search_time = time.time() - start_time
+        return {
+            "results": search_results,
+            "search_time": search_time,
+            "pattern": "C",
+            "pattern_description": "研究者キーワード + 論文（KAKEN + researchmap）"
+        }
+    
+    except Exception as e:
+        print("search_researchers_pattern_c内で例外発生:", e)
+        raise
+
+# 全パターン比較検索
+def compare_all_patterns(category, title, description, university="東京科学大学", top_k=10):
+    """
+    3つのパターンすべてを実行して結果を比較
+    """
+    try:
+        start_time = time.time()
+        
+        # 全パターンを並行実行
+        pattern_a_results = search_researchers_pattern_a(category, title, description, university, top_k)
+        pattern_b_results = search_researchers_pattern_b(category, title, description, university, top_k)
+        pattern_c_results = search_researchers_pattern_c(category, title, description, university, top_k)
+        
+        total_time = time.time() - start_time
+        
+        return {
+            "pattern_a": pattern_a_results,
+            "pattern_b": pattern_b_results,
+            "pattern_c": pattern_c_results,
+            "total_comparison_time": total_time,
+            "query_info": {
+                "category": category,
+                "title": title,
+                "description": description,
+                "university": university,
+                "top_k": top_k
+            }
+        }
+    
+    except Exception as e:
+        print("compare_all_patterns内で例外発生:", e)
+        raise
+
+# パターン別の説明生成関数
+def generate_explanation_pattern_a(query_text, researcher):
+    """Pattern A用の説明生成（基本情報のみ）"""
     prompt = f"""
     依頼内容: {query_text}
-    研究者: {researcher["name"]}
-    大学: {researcher["university"]}
-    所属: {researcher["affiliation"]}
-    研究分野： {researcher["research_field"]}
-    キーワード： {researcher["keywords"]}
+    研究者ID: {researcher["researcher_id"]}
+    所属: {researcher["researcher_affiliation_current"]}
+    職位: {researcher["researcher_position_current"]}
+    キーワード: {researcher["keywords_pi"]}
 
-    なぜこの研究者が依頼内容に適しているのかを簡潔に説明してください。
+    【Pattern A検索】研究者の基本情報とキーワードのみを基に、なぜこの研究者が依頼内容に適しているのかを簡潔に説明してください。
     """
-    messages=[{"role": "system", "content": "あなたは検索結果の解説を行うアシスタントです。"},
-            {"role": "user", "content": prompt}]
-
+    messages = [
+        {"role": "system", "content": "あなたは研究者マッチングの説明を行うアシスタントです。Pattern A（基本情報のみ）での検索結果を説明します。"},
+        {"role": "user", "content": prompt}
+    ]
     return get_openai_response(messages)
 
-# 動作検証用
-# 検索実行
-# input1 = "研究のアドバイス"
-# input2 = "建築構造一貫計算ソフトウェアに対する生成系AI機能を応用した操作性向上の研究"
-# input3 = "建築構造一貫計算ソフトウェアという専門ソフトウェアは操作性が難しく、初学者の習得ハードルを高める要因になっている。そこでUI/UX改善の手段として生成系AIをどのように活用できるか、専門者の知見を仮りたい。またアドバイスの方向性によっては今後の共同研究の方向性も探りたい。"
-# input1 = "コンサルティング・共同研究の相談"
-# input2 = "社会科教育における授業づくりを支援するアプリの開発"
-# input3 = "社会参加できる市民を育てるための授業作りを支援するアプリを開発するために、専門者の知見をかりたい。またアドバイスの方向性によっては今後の共同研究の方向性も探りたい。"
-# input1 = "アドバイス・業務改善の相談"
-# input2 = "小学校における授業づくりに関する相談"
-# input3 = "現在行っている授業の内容を分析してよりよい授業づくりを行うために、専門者の知見をかりたい。またアドバイスの方向性によっては今後のコラボレーションについても検討したい。"
+def generate_explanation_pattern_b(query_text, researcher):
+    """Pattern B用の説明生成（研究課題情報を含む）"""
+    prompt = f"""
+    依頼内容: {query_text}
+    研究者ID: {researcher["researcher_id"]}
+    所属: {researcher["researcher_affiliation_current"]}
+    職位: {researcher["researcher_position_current"]}
+    キーワード: {researcher["keywords_pi"]}
+    研究課題タイトル: {researcher.get("research_project_title", "")}
+    研究課題詳細: {researcher.get("research_project_details", "")}
+    研究成果: {researcher.get("research_achievement", "")}
 
-# results = search_researchers(category=input1, title=input2, description=input3, university="東京科学大学", top_k=3)
+    【Pattern B検索】研究者の基本情報、キーワード、および研究課題を基に、なぜこの研究者が依頼内容に適しているのかを説明してください。
+    """
+    messages = [
+        {"role": "system", "content": "あなたは研究者マッチングの説明を行うアシスタントです。Pattern B（研究課題を含む）での検索結果を説明します。"},
+        {"role": "user", "content": prompt}
+    ]
+    return get_openai_response(messages)
 
-# for res in results:
-    # print(f"研究者: {res['name']}")
-    # print(f"研究分野: {res['research_field']}")
-    # print(f"マッチ理由: {res['explanation']}")
-    # print("------")
+def generate_explanation_pattern_c(query_text, researcher):
+    """Pattern C用の説明生成（論文情報を含む）"""
+    prompt = f"""
+    依頼内容: {query_text}
+    研究者ID: {researcher["researcher_id"]}
+    所属: {researcher["researcher_affiliation_current"]}
+    職位: {researcher["researcher_position_current"]}
+    キーワード: {researcher["keywords_pi"]}
+    論文タイトル: {researcher.get("publication_title", "")}
+    論文概要: {researcher.get("description_publication", "")}
+
+    【Pattern C検索】研究者の基本情報、キーワード、および論文情報を基に、なぜこの研究者が依頼内容に適しているのかを詳細に説明してください。
+    """
+    messages = [
+        {"role": "system", "content": "あなたは研究者マッチングの説明を行うアシスタントです。Pattern C（論文情報を含む）での検索結果を説明します。"},
+        {"role": "user", "content": prompt}
+    ]
+    return get_openai_response(messages)
+
+# 既存の関数（後方互換性のため）
+def search_researchers(category, title, description, university="東京科学大学", top_k=10):
+    """
+    既存のsearch_researchers関数（Pattern Aと同じ動作）
+    """
+    result = search_researchers_pattern_a(category, title, description, university, top_k)
+    return result["results"]  # 既存の形式で返す
+
+def generate_explanation(query_text, researcher):
+    """
+    既存のgenerate_explanation関数
+    """
+    return generate_explanation_pattern_a(query_text, researcher)

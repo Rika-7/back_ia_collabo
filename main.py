@@ -5,15 +5,21 @@ from sqlalchemy import text, or_, and_, Integer
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 
 # Import database components
 from database import get_db, engine, Base
 import models
 
-# Import ベクトルサーチ
-from components.search_researchers import search_researchers
+# Import ベクトルサーチ（更新版）
+from components.search_researchers import (
+    search_researchers, 
+    search_researchers_pattern_a,
+    search_researchers_pattern_b, 
+    search_researchers_pattern_c,
+    compare_all_patterns
+)
 
 # Load environment variables
 load_dotenv()
@@ -21,8 +27,8 @@ load_dotenv()
 # Create the FastAPI app with a title
 app = FastAPI(
     title="KenQ Industry-Academia Collaboration API",
-    description="API for managing researchers and projects",
-    version="0.1.0"
+    description="API for managing researchers and projects with corrected pattern comparison",
+    version="0.2.1"
 )
 
 # ミドルウェアの設定
@@ -50,10 +56,59 @@ class ResearchProjectSearchRequest(BaseModel):
     research_field: Optional[str] = None
     researcher_id: Optional[int] = None
 
+# リクエストモデル
+class SearchRequest(BaseModel):
+    category: str
+    title: str
+    description: str
+    university: str = "東京科学大学"
+    top_k: int = 10
+
+# パターン指定検索リクエストモデル
+class PatternSearchRequest(BaseModel):
+    category: str
+    title: str
+    description: str
+    university: str = "東京科学大学"
+    top_k: int = 10
+    pattern: str  # "A", "B", "C"
+
+# 単一研究者レスポンスモデル
+class ResearcherResponse(BaseModel):
+    researcher_id: str
+    name: Optional[str] = ""
+    university: str
+    affiliation: str
+    position: str
+    research_field: Optional[str] = ""
+    keywords: str
+    explanation: str
+    score: float
+    pattern: Optional[str] = None
+
+# パターン結果レスポンスモデル
+class PatternResultResponse(BaseModel):
+    results: List[ResearcherResponse]
+    search_time: float
+    pattern: str
+    pattern_description: str
+
+# 比較結果レスポンスモデル
+class ComparisonResultResponse(BaseModel):
+    pattern_a: PatternResultResponse
+    pattern_b: PatternResultResponse
+    pattern_c: PatternResultResponse
+    total_comparison_time: float
+    query_info: Dict[str, Any]
 
 @app.get("/", tags=["General"])
 def read_root():
-    return {"Hello": "World"}
+    return {
+        "Hello": "World", 
+        "version": "0.2.1", 
+        "status": "Field names corrected for Azure Search index",
+        "new_features": ["Pattern Comparison", "Corrected Field Mapping"]
+    }
 
 # --- Researcher endpoints ---
 @app.get("/researchers", tags=["Researchers"])
@@ -115,26 +170,7 @@ def get_researcher_by_id(researcher_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-# リクエストモデル
-class SearchRequest(BaseModel):
-    category: str
-    title: str
-    description: str
-    university: str = "東京科学大学"
-    top_k: int = 10  # 10件取得
-
-# レスポンスモデル
-class ResearcherResponse(BaseModel):
-    researcher_id: str
-    name: str
-    university: str
-    affiliation: str
-    position: str
-    research_field: str
-    keywords: str
-    explanation: str
-    score: float
-
+# 既存の検索エンドポイント（後方互換性）
 @app.post("/search-researchers", response_model=List[ResearcherResponse], tags=["Researchers"])
 def search_researchers_api(request: SearchRequest):
     try:
@@ -144,11 +180,122 @@ def search_researchers_api(request: SearchRequest):
             description=request.description,
             university=request.university,
             top_k=request.top_k
-            )
+        )
         
         return search_results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# パターン指定検索エンドポイント
+@app.post("/search-researchers-pattern", response_model=PatternResultResponse, tags=["Researchers"])
+def search_researchers_pattern_api(request: PatternSearchRequest):
+    """
+    指定されたパターンで研究者を検索
+    pattern: "A", "B", "C"
+    """
+    try:
+        if request.pattern.upper() == "A":
+            result = search_researchers_pattern_a(
+                category=request.category,
+                title=request.title,
+                description=request.description,
+                university=request.university,
+                top_k=request.top_k
+            )
+        elif request.pattern.upper() == "B":
+            result = search_researchers_pattern_b(
+                category=request.category,
+                title=request.title,
+                description=request.description,
+                university=request.university,
+                top_k=request.top_k
+            )
+        elif request.pattern.upper() == "C":
+            result = search_researchers_pattern_c(
+                category=request.category,
+                title=request.title,
+                description=request.description,
+                university=request.university,
+                top_k=request.top_k
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid pattern. Must be A, B, or C")
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# パターン比較エンドポイント（新機能）
+@app.post("/compare-patterns", response_model=ComparisonResultResponse, tags=["Researchers"])
+def compare_patterns_api(request: SearchRequest):
+    """
+    3つのパターンすべてで研究者を検索し、結果を比較
+    Pattern A: 研究者キーワードのみ（KAKEN）
+    Pattern B: 研究者キーワード + 研究課題（KAKEN拡張）
+    Pattern C: 研究者キーワード + 論文（KAKEN + researchmap）
+    """
+    try:
+        comparison_results = compare_all_patterns(
+            category=request.category,
+            title=request.title,
+            description=request.description,
+            university=request.university,
+            top_k=request.top_k
+        )
+        
+        return comparison_results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# パターン情報取得エンドポイント
+@app.get("/patterns-info", tags=["Researchers"])
+def get_patterns_info():
+    """
+    各パターンの詳細情報を取得
+    """
+    return {
+        "patterns": {
+            "A": {
+                "name": "Pattern A",
+                "description": "研究者キーワードのみ",
+                "data_source": "KAKEN",
+                "available_fields": ["researcher_id", "affiliation", "position", "keywords"],
+                "features": [
+                    "高速検索",
+                    "基本的なマッチング",
+                    "シンプルな検索アルゴリズム"
+                ]
+            },
+            "B": {
+                "name": "Pattern B", 
+                "description": "研究者キーワード + 研究課題",
+                "data_source": "KAKEN拡張",
+                "available_fields": ["researcher_id", "affiliation", "position", "keywords", "research_projects"],
+                "features": [
+                    "研究課題を含む詳細マッチング",
+                    "より精密な関連性評価",
+                    "中程度の検索精度"
+                ]
+            },
+            "C": {
+                "name": "Pattern C",
+                "description": "研究者キーワード + 論文（タイトル・概要）", 
+                "data_source": "KAKEN + researchmap",
+                "available_fields": ["researcher_id", "affiliation", "position", "keywords", "publications"],
+                "features": [
+                    "最高精度",
+                    "論文情報を含む包括的マッチング",
+                    "最も詳細な関連性分析"
+                ]
+            }
+        },
+        "comparison_benefits": [
+            "精度の違いを比較分析",
+            "検索時間の比較",
+            "マッチング品質の違いを確認",
+            "用途に応じた最適パターン選択"
+        ]
+    }
 
 # --- Research Project endpoints ---
 @app.get("/research-projects", tags=["Research Projects"])
@@ -309,7 +456,6 @@ def get_research_projects_by_researcher(researcher_id: int, db: Session = Depend
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-
 # --- Project matting endpoints ---
 # 予算フィルター範囲マップ
 budget_ranges = {
@@ -337,7 +483,6 @@ def search_projects(
     keyword: str = "",
     budget_range: str = Query(None),
     deadline_range: str = Query(None),
-    # research_field: str = Query(None),
     db: Session = Depends(get_db)
 ):
     try:
@@ -349,12 +494,6 @@ def search_projects(
                 models.Project.research_field.ilike(keyword_pattern)
             )
         ]
-
-        """
-        # 研究分野フィルター（完全一致）
-        if research_field:
-            filters.append(models.Project.research_field == research_field)
-        """
 
         # 予算フィルター（文字列 → 数値比較用に前処理）
         if budget_range and budget_range in budget_ranges:
@@ -387,11 +526,11 @@ def search_projects(
             project_list.append({
                 "project_id": project.project_id,
                 "project_title": project.project_title,
-                "project_content":project.project_content,
+                "project_content": project.project_content,
                 "research_field": project.research_field,
                 "project_status": project.project_status,
                 "budget": project.budget,
-                "preferred_researcher_level":project.preferred_researcher_level,
+                "preferred_researcher_level": project.preferred_researcher_level,
                 "application_deadline": project.application_deadline,
                 "company_name": company.company_name
             })
@@ -404,12 +543,3 @@ def search_projects(
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
-    
-    """
-    パラメータ例
-    GET /search-projects?
-    keyword=バイオ&
-    budget_range=750万円〜&
-    deadline_range=90日以内&
-    # research_field=人工知能
-    """
