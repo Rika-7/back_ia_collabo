@@ -56,6 +56,10 @@ class ResearchProjectSearchRequest(BaseModel):
     research_field: Optional[str] = None
     researcher_id: Optional[int] = None
 
+# NEW: Batch researcher names request model
+class ResearcherNamesRequest(BaseModel):
+    researcher_ids: List[str]
+
 # リクエストモデル
 class SearchRequest(BaseModel):
     category: str
@@ -107,7 +111,7 @@ def read_root():
         "Hello": "World", 
         "version": "0.2.1", 
         "status": "Field names corrected for Azure Search index",
-        "new_features": ["Pattern Comparison", "Corrected Field Mapping"]
+        "new_features": ["Pattern Comparison", "Corrected Field Mapping", "Batch Researcher Names"]
     }
 
 # --- Researcher endpoints ---
@@ -137,11 +141,17 @@ def get_researchers(db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
+# UPDATED: Fixed to handle string IDs
 @app.get("/researchers/{researcher_id}", tags=["Researchers"])
-def get_researcher_by_id(researcher_id: int, db: Session = Depends(get_db)):
+def get_researcher_by_id(researcher_id: str, db: Session = Depends(get_db)):  # Changed from int to str
     try:
-        # Find researcher by ID
-        researcher = db.query(models.Researcher).filter(models.Researcher.researcher_id == researcher_id).first()
+        # Find researcher by ID - handle both string and int searches to be safe
+        researcher = db.query(models.Researcher).filter(
+            or_(
+                models.Researcher.researcher_id == researcher_id,
+                models.Researcher.researcher_id == str(researcher_id)
+            )
+        ).first()
         
         if not researcher:
             return {"status": "error", "message": "Researcher not found"}
@@ -167,6 +177,44 @@ def get_researcher_by_id(researcher_id: int, db: Session = Depends(get_db)):
         }
         
         return {"status": "success", "researcher": result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# NEW: Batch researcher names endpoint - Get multiple researchers at once
+@app.post("/researchers/batch-names", tags=["Researchers"])
+def get_researchers_batch_names(request: ResearcherNamesRequest, db: Session = Depends(get_db)):
+    """
+    Get names for multiple researchers at once - more efficient than individual calls
+    """
+    try:
+        # Get all researchers whose IDs are in the list
+        researchers = db.query(models.Researcher).filter(
+            models.Researcher.researcher_id.in_(request.researcher_ids)
+        ).all()
+        
+        # Create a dictionary mapping researcher_id -> names
+        result = {}
+        for researcher in researchers:
+            result[researcher.researcher_id] = {
+                "researcher_id": researcher.researcher_id,
+                "name": researcher.researcher_name or f"研究者ID: {researcher.researcher_id}",
+                "name_alphabet": researcher.researcher_name_alphabet or "",
+                "affiliation": researcher.researcher_affiliation_current or "",
+                "position": researcher.researcher_position_current or ""
+            }
+        
+        # For any IDs not found, add placeholder entries
+        for researcher_id in request.researcher_ids:
+            if researcher_id not in result:
+                result[researcher_id] = {
+                    "researcher_id": researcher_id,
+                    "name": f"研究者ID: {researcher_id}",
+                    "name_alphabet": "",
+                    "affiliation": "",
+                    "position": ""
+                }
+        
+        return {"status": "success", "researchers": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 

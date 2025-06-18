@@ -1,11 +1,11 @@
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Text
 from database import Base
 
 class Researcher(Base):
     __tablename__ = "researcher_information"
 
-    researcher_id = Column(Integer, primary_key=True)
+    # Based on your database schema image, the actual column names are:
+    researcher_id = Column(String(8), primary_key=True)
     researcher_name = Column(String(255))
     researcher_name_kana = Column(String(255))
     researcher_name_alphabet = Column(String(255))
@@ -21,65 +21,44 @@ class Researcher(Base):
     researchmap_url = Column(String(500))
     jglobal_url = Column(String(500))
     orcid_url = Column(String(500))
-    other_urls = Column(Text)
+    other_urls = Column(String(500))
 
+# Add the missing models that are referenced in main.py
 class ResearchProject(Base):
-    __tablename__ = "research_project"
+    __tablename__ = "research_projects"  # Update this to match your actual table name
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True)
     research_project_id = Column(String(255))
-    researcher_id = Column(Integer)
-    research_project_title = Column(String(1000))
+    researcher_id = Column(String(8))  # Changed to String to match Researcher
+    research_project_title = Column(String(255))
     research_project_details = Column(Text)
-    research_field = Column(String(500))
+    research_field = Column(String(255))
     research_achievement = Column(Text)
 
-# Company related models for project matching
 class Company(Base):
-    __tablename__ = "company"
+    __tablename__ = "companies"  # Update this to match your actual table name
     
-    company_id = Column(Integer, primary_key=True, autoincrement=True)
-    company_name = Column(String(255), nullable=False)
-    company_description = Column(Text)
-    company_website = Column(String(500))
-    company_address = Column(String(500))
-    company_phone = Column(String(50))
-    company_email = Column(String(255))
-    created_at = Column(DateTime)
-    updated_at = Column(DateTime)
+    company_id = Column(Integer, primary_key=True)
+    company_name = Column(String(255))
 
 class CompanyUser(Base):
-    __tablename__ = "company_user"
+    __tablename__ = "company_users"  # Update this to match your actual table name
     
-    company_user_id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey("company.company_id"))
-    user_name = Column(String(255))
-    user_email = Column(String(255))
-    user_password = Column(String(255))
-    user_position = Column(String(255))
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime)
-    updated_at = Column(DateTime)
-    
-    # Relationship
-    company = relationship("Company", backref="users")
+    company_user_id = Column(Integer, primary_key=True)
+    company_id = Column(Integer)
 
 class Project(Base):
-    __tablename__ = "project"
-    
-    project_id = Column(Integer, primary_key=True, autoincrement=True)
-    company_user_id = Column(Integer, ForeignKey("company_user.company_user_id"))
-    project_title = Column(String(500), nullable=False)
+    __tablename__ = "project_information"
+
+    project_id = Column(Integer, primary_key=True)
+    types_to_register = Column(String(255))
+    company_user_id = Column(Integer)
+    project_title = Column(String(255))
+    consultation_category = Column(Integer)
     project_content = Column(Text)
-    research_field = Column(String(500))
-    project_status = Column(String(100))  # "募集中", "進行中", "完了", etc.
-    budget = Column(String(100))  # Store as string like "100万円"
-    preferred_researcher_level = Column(String(255))  # "教授", "准教授", "助教", etc.
-    application_deadline = Column(DateTime)
-    project_start_date = Column(DateTime)
-    project_end_date = Column(DateTime)
-    created_at = Column(DateTime)
-    updated_at = Column(DateTime)
-    
-    # Relationship
-    company_user = relationship("CompanyUser", backref="projects")
+    research_field = Column(String(255))
+    preferred_researcher_level = Column(String(255))
+    budget = Column(String(255))
+    application_deadline = Column(String(255))
+    project_status = Column(Integer)
+    closed_date = Column(String(255))
