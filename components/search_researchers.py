@@ -117,7 +117,7 @@ def search_researchers_pattern_a(category, title, description, university="東�
         # Pattern A専用のSearchClientを取得
         search_client = get_search_client_for_pattern("A")
         
-        # パターンA用のフィールド選択（基本情報のみ）
+        # パターンA用のフィールド選択（研究者名を含む）
         results = search_client.search(
             search_text=None,
             vector_queries=[
@@ -127,7 +127,8 @@ def search_researchers_pattern_a(category, title, description, university="東�
                     fields="science_tokyo_pattern_a"  # Pattern A vector field
                 )
             ],
-            select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi"],
+            # UPDATED: Include researcher name fields
+            select=["id", "researcher_id", "researcher_name", "researcher_name_alphabet", "researcher_affiliation_current", "researcher_position_current", "keywords_pi"],
             filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
         )
 
@@ -136,7 +137,9 @@ def search_researchers_pattern_a(category, title, description, university="東�
             explanation = generate_explanation_pattern_a(query_text, result)
             search_results.append({
                 "researcher_id": result["researcher_id"],
-                "name": "",  # Not available in Pattern A
+                # UPDATED: Use actual names from search results
+                "name": result.get("researcher_name", f"研究者ID: {result['researcher_id']}"),
+                "name_alphabet": result.get("researcher_name_alphabet", ""),
                 "university": university,  # Use the filtered university
                 "affiliation": result["researcher_affiliation_current"],
                 "position": result["researcher_position_current"],
@@ -172,7 +175,7 @@ def search_researchers_pattern_b(category, title, description, university="東�
         # Pattern B専用のSearchClientを取得
         search_client = get_search_client_for_pattern("B")
         
-        # パターンB用のフィールド選択（研究課題情報を含む）
+        # パターンB用のフィールド選択（研究課題情報と研究者名を含む）
         results = search_client.search(
             search_text=None,
             vector_queries=[
@@ -182,7 +185,8 @@ def search_researchers_pattern_b(category, title, description, university="東�
                     fields="science_tokyo_pattern_b"  # Pattern B vector field
                 )
             ],
-            select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi", "research_project_title", "research_project_details", "research_achievement"],
+            # UPDATED: Include researcher name fields
+            select=["id", "researcher_id", "researcher_name", "researcher_name_alphabet", "researcher_affiliation_current", "researcher_position_current", "keywords_pi", "research_project_title", "research_project_details", "research_achievement"],
             filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
         )
 
@@ -191,7 +195,9 @@ def search_researchers_pattern_b(category, title, description, university="東�
             explanation = generate_explanation_pattern_b(query_text, result)
             search_results.append({
                 "researcher_id": result["researcher_id"],
-                "name": "",  # Not available in Pattern B
+                # UPDATED: Use actual names from search results
+                "name": result.get("researcher_name", f"研究者ID: {result['researcher_id']}"),
+                "name_alphabet": result.get("researcher_name_alphabet", ""),
                 "university": university,  # Use the filtered university
                 "affiliation": result["researcher_affiliation_current"],
                 "position": result["researcher_position_current"],
@@ -228,7 +234,7 @@ def search_researchers_pattern_c(category, title, description, university="東�
         # Pattern C専用のSearchClientを取得
         search_client = get_search_client_for_pattern("C")
         
-        # パターンC用のフィールド選択（論文情報を含む）
+        # パターンC用のフィールド選択（論文情報と研究者名を含む）
         results = search_client.search(
             search_text=None,
             vector_queries=[
@@ -238,7 +244,8 @@ def search_researchers_pattern_c(category, title, description, university="東�
                     fields="science_tokyo_pattern_c"  # Pattern C vector field
                 )
             ],
-            select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi", "publication_title", "description_publication"],
+            # UPDATED: Include researcher name fields
+            select=["id", "researcher_id", "researcher_name", "researcher_name_alphabet", "researcher_affiliation_current", "researcher_position_current", "keywords_pi", "publication_title", "description_publication"],
             filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
         )
 
@@ -247,7 +254,9 @@ def search_researchers_pattern_c(category, title, description, university="東�
             explanation = generate_explanation_pattern_c(query_text, result)
             search_results.append({
                 "researcher_id": result["researcher_id"],
-                "name": "",  # Not available in Pattern C
+                # UPDATED: Use actual names from search results
+                "name": result.get("researcher_name", f"研究者ID: {result['researcher_id']}"),
+                "name_alphabet": result.get("researcher_name_alphabet", ""),
                 "university": university,  # Use the filtered university
                 "affiliation": result["researcher_affiliation_current"],
                 "position": result["researcher_position_current"],
@@ -310,6 +319,7 @@ def generate_explanation_pattern_a(query_text, researcher):
     prompt = f"""
     依頼内容: {query_text}
     研究者ID: {researcher["researcher_id"]}
+    研究者名: {researcher.get("researcher_name", "")}
     所属: {researcher["researcher_affiliation_current"]}
     職位: {researcher["researcher_position_current"]}
     キーワード: {researcher["keywords_pi"]}
@@ -327,6 +337,7 @@ def generate_explanation_pattern_b(query_text, researcher):
     prompt = f"""
     依頼内容: {query_text}
     研究者ID: {researcher["researcher_id"]}
+    研究者名: {researcher.get("researcher_name", "")}
     所属: {researcher["researcher_affiliation_current"]}
     職位: {researcher["researcher_position_current"]}
     キーワード: {researcher["keywords_pi"]}
@@ -347,6 +358,7 @@ def generate_explanation_pattern_c(query_text, researcher):
     prompt = f"""
     依頼内容: {query_text}
     研究者ID: {researcher["researcher_id"]}
+    研究者名: {researcher.get("researcher_name", "")}
     所属: {researcher["researcher_affiliation_current"]}
     職位: {researcher["researcher_position_current"]}
     キーワード: {researcher["keywords_pi"]}
