@@ -104,10 +104,76 @@ def get_openai_response(messages):
     else:
         raise Exception(f"Request failed with status code {response.status_code}: {response.text}")
 
-# パターンA: 研究者キーワードのみ検索
+def deduplicate_researchers(raw_results, top_k=10):
+    """
+    研究者IDで重複を除去し、各研究者の最高スコアの記録のみを保持
+    
+    Parameters:
+    raw_results: Azure Searchからの生の結果
+    top_k: 返すユニーク研究者の数
+    
+    Returns:
+    list: 重複除去された研究者リスト
+    """
+    researcher_dict = {}
+    
+    # 各結果を処理し、研究者IDごとに最高スコアの記録を保持
+    for result in raw_results:
+        researcher_id = result["researcher_id"]
+        current_score = result.get('@search.score', 0)
+        
+        # この研究者が初めて出現するか、より高いスコアを持つ場合
+        if (researcher_id not in researcher_dict or 
+            current_score > researcher_dict[researcher_id].get('@search.score', 0)):
+            researcher_dict[researcher_id] = result
+    
+    # スコア順にソートし、上位top_k件を返す
+    unique_researchers = list(researcher_dict.values())
+    unique_researchers.sort(key=lambda x: x.get('@search.score', 0), reverse=True)
+    
+    return unique_researchers[:top_k]
+
+def merge_researcher_information(results_for_researcher):
+    """
+    同一研究者の複数レコードから情報をマージ（オプション機能）
+    
+    Parameters:
+    results_for_researcher: 同一研究者の複数レコードのリスト
+    
+    Returns:
+    dict: マージされた研究者情報
+    """
+    if not results_for_researcher:
+        return None
+    
+    # 最高スコアのレコードをベースとする
+    base_record = max(results_for_researcher, key=lambda x: x.get('@search.score', 0))
+    
+    # キーワードや研究プロジェクトなどをマージ（必要に応じて）
+    merged_keywords = set()
+    merged_projects = set()
+    
+    for record in results_for_researcher:
+        # キーワードのマージ
+        if record.get("keywords_pi"):
+            keywords = record["keywords_pi"].split(";") if ";" in record["keywords_pi"] else [record["keywords_pi"]]
+            merged_keywords.update([k.strip() for k in keywords if k.strip()])
+        
+        # 研究プロジェクトのマージ（Pattern Bの場合）
+        if record.get("research_project_title"):
+            merged_projects.add(record["research_project_title"])
+    
+    # ベースレコードを更新
+    if merged_keywords:
+        base_record["keywords_pi"] = "; ".join(list(merged_keywords)[:10])  # 最大10個のキーワード
+    
+    return base_record
+
+# パターンA: 研究者キーワードのみ検索（重複除去付き）
 def search_researchers_pattern_a(category, title, description, university="東京科学大学", top_k=10):
     """
     Pattern A: 研究者キーワードのみを使用した検索（KAKENデータのみ）
+    重複する研究者を除去し、ユニークな研究者のみを返す
     """
     try:
         start_time = time.time()
@@ -117,33 +183,37 @@ def search_researchers_pattern_a(category, title, description, university="東�
         # Pattern A専用のSearchClientを取得
         search_client = get_search_client_for_pattern("A")
         
-        # FIXED: Remove non-existent fields (researcher_name, researcher_name_alphabet)
+        # より多くの結果を取得してから重複除去（top_k * 3 で十分なユニーク結果を確保）
+        search_k = min(top_k * 3, 50)  # 最大50件まで
+        
         results = search_client.search(
             search_text=None,
             vector_queries=[
                 VectorizedQuery(
                     vector=embedding,
-                    k_nearest_neighbors=top_k,
+                    k_nearest_neighbors=search_k,
                     fields="science_tokyo_pattern_a"  # Pattern A vector field
                 )
             ],
-            # FIXED: Only include fields that exist in the Azure Search index
             select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi"],
             filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
         )
 
+        # 生の結果を重複除去
+        raw_results = list(results)
+        unique_results = deduplicate_researchers(raw_results, top_k)
+        
         search_results = []
-        for result in results:
+        for result in unique_results:
             explanation = generate_explanation_pattern_a(query_text, result)
             search_results.append({
                 "researcher_id": result["researcher_id"],
-                # FIXED: Use placeholder since names are not in Azure Search index
                 "name": f"研究者ID: {result['researcher_id']}",
-                "name_alphabet": "",  # Not available in index
-                "university": university,  # Use the filtered university
+                "name_alphabet": "",
+                "university": university,
                 "affiliation": result["researcher_affiliation_current"],
                 "position": result["researcher_position_current"],
-                "research_field": "",  # Not available in Pattern A
+                "research_field": "",
                 "keywords": result["keywords_pi"],
                 "explanation": explanation,
                 "score": result.get('@search.score', 0),
@@ -155,17 +225,18 @@ def search_researchers_pattern_a(category, title, description, university="東�
             "results": search_results,
             "search_time": search_time,
             "pattern": "A",
-            "pattern_description": "研究者キーワードのみ（KAKEN）"
+            "pattern_description": "研究者キーワードのみ（KAKEN）- 重複除去済み"
         }
     
     except Exception as e:
         print("search_researchers_pattern_a内で例外発生:", e)
         raise
 
-# パターンB: 研究者キーワード + 研究課題
+# パターンB: 研究者キーワード + 研究課題（重複除去付き）
 def search_researchers_pattern_b(category, title, description, university="東京科学大学", top_k=10):
     """
     Pattern B: 研究者キーワード + 研究課題を使用した検索（KAKENデータ拡張）
+    重複する研究者を除去し、ユニークな研究者のみを返す
     """
     try:
         start_time = time.time()
@@ -175,33 +246,37 @@ def search_researchers_pattern_b(category, title, description, university="東�
         # Pattern B専用のSearchClientを取得
         search_client = get_search_client_for_pattern("B")
         
-        # FIXED: Remove non-existent fields (researcher_name, researcher_name_alphabet)
+        # より多くの結果を取得してから重複除去
+        search_k = min(top_k * 3, 50)
+        
         results = search_client.search(
             search_text=None,
             vector_queries=[
                 VectorizedQuery(
                     vector=embedding,
-                    k_nearest_neighbors=top_k,
+                    k_nearest_neighbors=search_k,
                     fields="science_tokyo_pattern_b"  # Pattern B vector field
                 )
             ],
-            # FIXED: Only include fields that exist in the Azure Search index
             select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi", "research_project_title", "research_project_details", "research_achievement"],
             filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
         )
 
+        # 生の結果を重複除去
+        raw_results = list(results)
+        unique_results = deduplicate_researchers(raw_results, top_k)
+        
         search_results = []
-        for result in results:
+        for result in unique_results:
             explanation = generate_explanation_pattern_b(query_text, result)
             search_results.append({
                 "researcher_id": result["researcher_id"],
-                # FIXED: Use placeholder since names are not in Azure Search index
                 "name": f"研究者ID: {result['researcher_id']}",
-                "name_alphabet": "",  # Not available in index
-                "university": university,  # Use the filtered university
+                "name_alphabet": "",
+                "university": university,
                 "affiliation": result["researcher_affiliation_current"],
                 "position": result["researcher_position_current"],
-                "research_field": "",  # Not available in Pattern B
+                "research_field": "",
                 "keywords": result["keywords_pi"],
                 "research_projects": f"{result.get('research_project_title', '')} | {result.get('research_project_details', '')} | {result.get('research_achievement', '')}",
                 "explanation": explanation,
@@ -214,17 +289,18 @@ def search_researchers_pattern_b(category, title, description, university="東�
             "results": search_results,
             "search_time": search_time,
             "pattern": "B", 
-            "pattern_description": "研究者キーワード + 研究課題（KAKEN拡張）"
+            "pattern_description": "研究者キーワード + 研究課題（KAKEN拡張）- 重複除去済み"
         }
     
     except Exception as e:
         print("search_researchers_pattern_b内で例外発生:", e)
         raise
 
-# パターンC: 研究者キーワード + 論文（タイトル・概要）
+# パターンC: 研究者キーワード + 論文（タイトル・概要）（重複除去付き）
 def search_researchers_pattern_c(category, title, description, university="東京科学大学", top_k=10):
     """
     Pattern C: 研究者キーワード + 論文（タイトル・概要）を使用した検索（KAKEN + researchmap）
+    重複する研究者を除去し、ユニークな研究者のみを返す
     """
     try:
         start_time = time.time()
@@ -234,33 +310,37 @@ def search_researchers_pattern_c(category, title, description, university="東�
         # Pattern C専用のSearchClientを取得
         search_client = get_search_client_for_pattern("C")
         
-        # FIXED: Remove non-existent fields (researcher_name, researcher_name_alphabet)
+        # より多くの結果を取得してから重複除去
+        search_k = min(top_k * 3, 50)
+        
         results = search_client.search(
             search_text=None,
             vector_queries=[
                 VectorizedQuery(
                     vector=embedding,
-                    k_nearest_neighbors=top_k,
+                    k_nearest_neighbors=search_k,
                     fields="science_tokyo_pattern_c"  # Pattern C vector field
                 )
             ],
-            # FIXED: Only include fields that exist in the Azure Search index
             select=["id", "researcher_id", "researcher_affiliation_current", "researcher_position_current", "keywords_pi", "publication_title", "description_publication"],
             filter=f"search.ismatch('{university}', 'researcher_affiliation_current')"
         )
 
+        # 生の結果を重複除去
+        raw_results = list(results)
+        unique_results = deduplicate_researchers(raw_results, top_k)
+        
         search_results = []
-        for result in results:
+        for result in unique_results:
             explanation = generate_explanation_pattern_c(query_text, result)
             search_results.append({
                 "researcher_id": result["researcher_id"],
-                # FIXED: Use placeholder since names are not in Azure Search index
                 "name": f"研究者ID: {result['researcher_id']}",
-                "name_alphabet": "",  # Not available in index
-                "university": university,  # Use the filtered university
+                "name_alphabet": "",
+                "university": university,
                 "affiliation": result["researcher_affiliation_current"],
                 "position": result["researcher_position_current"],
-                "research_field": "",  # Not available in Pattern C
+                "research_field": "",
                 "keywords": result["keywords_pi"],
                 "publications": f"{result.get('publication_title', '')} | {result.get('description_publication', '')}",
                 "explanation": explanation,
@@ -273,7 +353,7 @@ def search_researchers_pattern_c(category, title, description, university="東�
             "results": search_results,
             "search_time": search_time,
             "pattern": "C",
-            "pattern_description": "研究者キーワード + 論文（KAKEN + researchmap）"
+            "pattern_description": "研究者キーワード + 論文（KAKEN + researchmap）- 重複除去済み"
         }
     
     except Exception as e:
@@ -284,6 +364,7 @@ def search_researchers_pattern_c(category, title, description, university="東�
 def compare_all_patterns(category, title, description, university="東京科学大学", top_k=10):
     """
     3つのパターンすべてを実行して結果を比較
+    各パターンで重複除去を実行
     """
     try:
         start_time = time.time()
@@ -374,6 +455,7 @@ def generate_explanation_pattern_c(query_text, researcher):
 def search_researchers(category, title, description, university="東京科学大学", top_k=10):
     """
     既存のsearch_researchers関数（Pattern Aと同じ動作）
+    重複除去付き
     """
     result = search_researchers_pattern_a(category, title, description, university, top_k)
     return result["results"]  # 既存の形式で返す
