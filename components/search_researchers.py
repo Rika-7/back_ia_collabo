@@ -311,7 +311,7 @@ def search_researchers_pattern_c(category, title, description, university="東�
         search_client = get_search_client_for_pattern("C")
         
         # より多くの結果を取得してから重複除去
-        search_k = min(top_k * 3, 50)
+        search_k = min(top_k * 3, 80)
         
         results = search_client.search(
             search_text=None,
