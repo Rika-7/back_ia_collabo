@@ -28,7 +28,7 @@ load_dotenv()
 app = FastAPI(
     title="KenQ Industry-Academia Collaboration API",
     description="API for managing researchers and projects with corrected pattern comparison",
-    version="0.2.1"
+    version="0.2.2"
 )
 
 # ミドルウェアの設定
@@ -59,6 +59,22 @@ class ResearchProjectSearchRequest(BaseModel):
 # NEW: Batch researcher names request model
 class ResearcherNamesRequest(BaseModel):
     researcher_ids: List[str]
+
+# NEW: Project response model for frontend (matches what frontend expects)
+class ProjectResponse(BaseModel):
+    project_id: int
+    project_title: str
+    project_content: str
+    research_field: str
+    budget: str
+    preferred_researcher_level: str
+    application_deadline: str
+    company_user_id: int
+    types_to_register: str
+
+class ProjectsResponse(BaseModel):
+    status: str
+    projects: List[ProjectResponse]
 
 # リクエストモデル
 class SearchRequest(BaseModel):
@@ -109,10 +125,59 @@ class ComparisonResultResponse(BaseModel):
 def read_root():
     return {
         "Hello": "World", 
-        "version": "0.2.1", 
-        "status": "Field names corrected for Azure Search index",
-        "new_features": ["Pattern Comparison", "Corrected Field Mapping", "Batch Researcher Names"]
+        "version": "0.2.2", 
+        "status": "Added /filtered-projects endpoint for frontend",
+        "new_features": ["Pattern Comparison", "Corrected Field Mapping", "Batch Researcher Names", "Frontend Projects Endpoint"]
     }
+
+# --- THIS IS THE NEW ENDPOINT YOUR FRONTEND NEEDS! ---
+@app.get("/filtered-projects", tags=["Projects"])
+def get_filtered_projects(
+    types_to_register: str = Query(None),
+    preferred_researcher_level: str = Query(None),
+    limit: int = Query(6),
+    db: Session = Depends(get_db)
+):
+    """
+    Get filtered projects based on type and researcher level
+    This endpoint matches exactly what your frontend expects
+    """
+    try:
+        # Build the query
+        query = db.query(models.Project)
+        
+        # Add filters if provided
+        if types_to_register:
+            query = query.filter(models.Project.types_to_register == types_to_register)
+        
+        if preferred_researcher_level:
+            query = query.filter(models.Project.preferred_researcher_level == preferred_researcher_level)
+        
+        # Get projects with limit
+        projects = query.limit(limit).all()
+        
+        # Convert to list of dictionaries matching frontend expectations
+        result = []
+        for p in projects:
+            result.append({
+                "project_id": p.project_id,
+                "project_title": p.project_title,
+                "project_content": p.project_content,
+                "research_field": p.research_field,
+                "budget": p.budget or "",
+                "preferred_researcher_level": p.preferred_researcher_level or "",
+                "application_deadline": p.application_deadline or "",
+                "company_user_id": p.company_user_id,
+                "types_to_register": p.types_to_register or ""
+            })
+        
+        return {
+            "status": "success",
+            "projects": result
+        }
+    except Exception as e:
+        print(f"Error in get_filtered_projects: {e}")  # For debugging
+        return {"status": "error", "message": str(e)}
 
 # --- Researcher endpoints ---
 @app.get("/researchers", tags=["Researchers"])
